@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analisi turni — guida e sosta</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --board-bg:#0d1117;
+    --board-panel:#141b24;
+    --board-panel-2:#1a2330;
+    --amber:#ffb020;
+    --amber-dim:#8a5f14;
+    --cyan:#4fd3c4;
+    --red:#ff6b5e;
+    --ink:#e8ecf1;
+    --ink-dim:#8b97a6;
+    --line:#25303d;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; background:var(--board-bg); color:var(--ink);
+    font-family: 'Georgia', 'Iowan Old Style', ui-serif, serif;
+    min-height:100vh;
+  }
+  .mono{
+    font-family: 'SFMono-Regular','IBM Plex Mono', Menlo, Consolas, 'Courier New', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 20px 80px;}
+
+  header.top{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    border-bottom:2px solid var(--line); padding-bottom:16px; margin-bottom:22px;
+    flex-wrap:wrap; gap:12px;
+  }
+  header.top h1{
+    margin:0; font-size:28px; letter-spacing:0.5px; font-weight:600;
+  }
+  header.top h1 span{color:var(--amber);}
+  header.top p{margin:4px 0 0; color:var(--ink-dim); font-size:13.5px; font-family: system-ui, sans-serif;}
+  .badge-board{
+    font-family:'SFMono-Regular',monospace; font-size:11px; letter-spacing:2px;
+    color:var(--amber-dim); border:1px solid var(--amber-dim); border-radius:4px;
+    padding:4px 8px; text-transform:uppercase;
+  }
+
+  /* upload zone */
+  #dropzone{
+    border:1.5px dashed #33404f; border-radius:var(--radius);
+    background:var(--board-panel);
+    padding:34px 20px; text-align:center; cursor:pointer;
+    transition:border-color .15s, background .15s;
+    font-family: system-ui, sans-serif;
+  }
+  #dropzone.drag{ border-color:var(--amber); background:var(--board-panel-2); }
+  #dropzone .icon{font-size:30px; margin-bottom:8px; color:var(--amber);}
+  #dropzone h3{margin:0 0 4px; font-family:Georgia,serif; font-weight:600; font-size:18px;}
+  #dropzone p{margin:0; color:var(--ink-dim); font-size:13px;}
+  #fileInput{display:none;}
+
+  #status{
+    margin-top:14px; font-family:'SFMono-Regular',monospace; font-size:12.5px;
+    color:var(--cyan); min-height:18px; letter-spacing:.3px;
+  }
+  #status.err{color:var(--red);}
+
+  #progressBar{
+    height:3px; width:100%; background:var(--line); margin-top:8px; border-radius:2px; overflow:hidden;
+    display:none;
+  }
+  #progressBar > div{ height:100%; width:0%; background:var(--amber); transition:width .2s; }
+
+  /* summary strip */
+  #summary{
+    display:none;
+    margin-top:28px; margin-bottom:22px;
+    display:grid; grid-template-columns:repeat(5,1fr); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
+  }
+  .sum-cell{ background:var(--board-panel); padding:16px 14px; }
+  .sum-cell .label{font-family:system-ui,sans-serif; font-size:10.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-dim);}
+  .sum-cell .value{font-family:'SFMono-Regular',monospace; font-size:24px; color:var(--amber); margin-top:4px;}
+  .sum-cell .value.cyan{color:var(--cyan);}
+
+  /* controls */
+  #controls{
+    display:none;
+    margin-bottom:14px; gap:10px; align-items:center; flex-wrap:wrap;
+    font-family:system-ui, sans-serif;
+  }
+  #controls input[type=text]{
+    background:var(--board-panel); border:1px solid var(--line); color:var(--ink);
+    padding:8px 12px; border-radius:6px; font-size:13px; width:220px;
+  }
+  #controls select{
+    background:var(--board-panel); border:1px solid var(--line); color:var(--ink);
+    padding:8px 10px; border-radius:6px; font-size:13px;
+  }
+  #controls .count{color:var(--ink-dim); font-size:12.5px; margin-left:auto;}
+
+  /* cards grid */
+  #cards{display:none; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:14px;}
+
+  .card{
+    background:var(--board-panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px 16px 14px; cursor:pointer; transition:border-color .12s, transform .12s;
+  }
+  .card:hover{ border-color:var(--amber-dim); transform:translateY(-1px); }
+  .card-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;}
+  .card-head .turno{font-family:'SFMono-Regular',monospace; font-size:20px; color:var(--amber); letter-spacing:1px;}
+  .card-head .dep{font-family:system-ui,sans-serif; font-size:11.5px; color:var(--ink-dim); margin-top:2px;}
+  .tag{
+    font-family:system-ui,sans-serif; font-size:10px; letter-spacing:.5px; text-transform:uppercase;
+    padding:3px 7px; border-radius:20px; border:1px solid var(--amber-dim); color:var(--amber);
+  }
+  .tag.riserva{ border-color:#3b4a5c; color:var(--ink-dim); }
+
+  .orario-line{ font-family:'SFMono-Regular',monospace; font-size:12.5px; color:var(--ink-dim); margin-bottom:12px; }
+
+  .bar{ height:8px; border-radius:4px; background:var(--line); overflow:hidden; display:flex; margin-bottom:10px; }
+  .bar .guida{ background:var(--amber); height:100%; }
+  .bar .sosta{ background:#3b4a5c; height:100%; }
+
+  .metrics{ display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; font-family:system-ui,sans-serif; }
+  .metric .k{ font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-dim); }
+  .metric .v{ font-family:'SFMono-Regular',monospace; font-size:16px; margin-top:1px; }
+  .metric .v.amber{color:var(--amber);}
+  .metric .v.dim{color:#7f8ea0;}
+
+  .card-foot{
+    margin-top:12px; padding-top:10px; border-top:1px solid var(--line);
+    display:flex; justify-content:space-between; font-family:system-ui,sans-serif; font-size:11.5px; color:var(--ink-dim);
+  }
+
+  /* detail expand */
+  .detail{ display:none; margin-top:12px; border-top:1px solid var(--line); padding-top:10px; }
+  .detail table{ width:100%; border-collapse:collapse; font-family:'SFMono-Regular',monospace; font-size:11px; }
+  .detail th{ text-align:left; color:var(--ink-dim); font-weight:400; padding:3px 4px; border-bottom:1px solid var(--line); font-family:system-ui,sans-serif; font-size:10px; text-transform:uppercase;}
+  .detail td{ padding:3px 4px; border-bottom:1px solid #1c242e; color:var(--ink); }
+  .detail td.desc{ color:#c3cbd6; }
+  .card.expanded .detail{ display:block; }
+
+  footer{
+    margin-top:40px; text-align:center; color:var(--ink-dim);
+    font-family:system-ui,sans-serif; font-size:11.5px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Analisi <span>turni</span></h1>
+      <p>Carica il PDF dei turni: guida effettiva, soste e interruzioni per ciascun turno.</p>
+    </div>
+    <div class="badge-board">Elaborazione locale nel browser</div>
+  </header>
+
+  <div id="dropzone">
+    <div class="icon">&#128196;</div>
+    <h3>Trascina qui il PDF dei turni</h3>
+    <p>oppure clicca per selezionarlo — il file resta nel tuo browser, non viene caricato altrove</p>
+    <input type="file" id="fileInput" accept="application/pdf">
+  </div>
+  <div id="progressBar"><div id="progressFill"></div></div>
+  <div id="status"></div>
+
+  <div id="summary"></div>
+
+  <div id="controls">
+    <input type="text" id="searchBox" placeholder="Cerca turno (es. D001)">
+    <select id="sortSel">
+      <option value="turno">Ordina per turno</option>
+      <option value="guida_desc">Guida (decrescente)</option>
+      <option value="sosta_desc">Sosta (decrescente)</option>
+      <option value="netto_desc">Durata turno (decrescente)</option>
+    </select>
+    <span class="count" id="countLbl"></span>
+  </div>
+
+  <div id="cards"></div>
+
+  <footer>Documento non ufficiale — elaborazione automatica a scopo di analisi.</footer>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const statusEl = document.getElementById('status');
+const progressBar = document.getElementById('progressBar');
+const progressFill = document.getElementById('progressFill');
+const summaryEl = document.getElementById('summary');
+const controlsEl = document.getElementById('controls');
+const cardsEl = document.getElementById('cards');
+const searchBox = document.getElementById('searchBox');
+const sortSel = document.getElementById('sortSel');
+const countLbl = document.getElementById('countLbl');
+
+let allResults = [];
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+function setStatus(msg, isErr){
+  statusEl.textContent = msg || '';
+  statusEl.classList.toggle('err', !!isErr);
+}
+function setProgress(frac){
+  if (frac === null){ progressBar.style.display='none'; return; }
+  progressBar.style.display='block';
+  progressFill.style.width = Math.round(frac*100)+'%';
+}
+
+async function handleFile(file){
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    setStatus('Il file selezionato non è un PDF.', true);
+    return;
+  }
+  cardsEl.style.display = 'none';
+  summaryEl.style.display = 'none';
+  controlsEl.style.display = 'none';
+  setStatus('Lettura del file…');
+  setProgress(0);
+  try {
+    const buf = await file.arrayBuffer();
+    setStatus('Apertura del PDF…');
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    const blocks = await extractColumnBlocks(pdf, frac => {
+      setStatus(`Estrazione testo — pagina ${Math.round(frac*pdf.numPages)} di ${pdf.numPages}…`);
+      setProgress(frac);
+    });
+    setStatus('Analisi dei turni…');
+    const results = blocks.map(parseBlock).filter(r => r !== null);
+    if (!results.length){
+      setStatus('Nessun turno riconosciuto in questo PDF. Verifica che sia il documento corretto.', true);
+      setProgress(null);
+      return;
+    }
+    allResults = results;
+    setProgress(null);
+    setStatus(`Fatto — ${results.length} turni analizzati.`);
+    renderSummary(results);
+    renderCards(results);
+    controlsEl.style.display = 'flex';
+  } catch(err){
+    console.error(err);
+    setProgress(null);
+    setStatus('Errore durante l\'elaborazione: ' + err.message, true);
+  }
+}
+
+// ---------- PDF text extraction, column-aware ----------
+async function extractColumnBlocks(pdf, onProgress){
+  const blocks = [];
+  for (let pno = 1; pno <= pdf.numPages; pno++){
+    const page = await pdf.getPage(pno);
+    const viewport = page.getViewport({scale:1});
+    const content = await page.getTextContent();
+    const mid = viewport.width * 0.481;
+
+    // le coordinate grezze di pdf.js sono nello spazio "non ruotato" della pagina;
+    // le combiniamo con la trasformazione del viewport (che include l'eventuale
+    // rotazione /Rotate della pagina) per ottenere le coordinate visive corrette.
+    const items = content.items
+      .filter(it => it.str && it.str.trim() !== '')
+      .map(it => {
+        const c = pdfjsLib.Util.transform(viewport.transform, it.transform);
+        return {text: it.str, x: c[4], y: c[5]};
+      });
+
+    const left = items.filter(it => it.x < mid);
+    const right = items.filter(it => it.x >= mid);
+    blocks.push({text: linesFromWords(left), page: pno, col: 'L'});
+    blocks.push({text: linesFromWords(right), page: pno, col: 'R'});
+    onProgress(pno / pdf.numPages);
+  }
+  return blocks;
+}
+
+function linesFromWords(words, tol){
+  tol = tol || 2.6;
+  // dopo la trasformazione del viewport, y cresce verso il basso: ordino
+  // dall'alto verso il basso (y crescente), poi da sinistra a destra
+  const sorted = words.slice().sort((a,b) => (a.y - b.y) || (a.x - b.x));
+  const lines = [];
+  let cur = [];
+  let curY = null;
+  for (const w of sorted){
+    if (curY === null || Math.abs(w.y - curY) <= tol){
+      cur.push(w);
+      if (curY === null) curY = w.y;
+    } else {
+      lines.push(cur);
+      cur = [w];
+      curY = w.y;
+    }
+  }
+  if (cur.length) lines.push(cur);
+  const outLines = lines.map(ln => {
+    ln.sort((a,b) => a.x - b.x);
+    return ln.map(w => w.text.trim()).filter(Boolean).join(' ');
+  });
+  return outLines.join('\n');
+}
+
+// ---------- Parsing a single column block into a turno record ----------
+function toMinColon(s){ const [h,m] = s.split(':').map(Number); return h*60+m; }
+function toMinDot(s){ const p = s.split('.'); return parseInt(p[0],10)*60 + parseInt(p[1],10); }
+function rollFwd(val, ref){ while (val < ref) val += 1440; return val; }
+function mmHHMM(m){
+  if (m === null || m === undefined) return '';
+  const sign = m < 0 ? '-' : '';
+  m = Math.round(Math.abs(m));
+  return `${sign}${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`;
+}
+function clockLabel(absMin){
+  const day = Math.floor(absMin/1440);
+  const m = ((absMin%1440)+1440)%1440;
+  let s = `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  if (day > 0) s += ` (+${day}g)`;
+  return s;
+}
+
+function parseBlock(block){
+  let text = block.text.replace(/Smonta(?=[A-Z])/g, 'Smonta ');
+  const lines = text.split('\n');
+
+  let tid = null;
+  for (let i=0; i<Math.min(6,lines.length); i++){
+    if (/^D\d{3}$/.test(lines[i].trim())){ tid = lines[i].trim(); break; }
+  }
+  if (!tid) return null;
+
+  let monta=null, smonta=null, deposito=null;
+  for (const ln of lines){
+    if (ln.trim().startsWith('Monta ') && ln.includes('Smonta')){
+      const toks = ln.split(/\s+/).filter(Boolean);
+      const sidx = toks.indexOf('Smonta');
+      if (sidx > 0){
+        monta = toks.slice(1, sidx).join(' ');
+        deposito = toks[toks.length-1];
+        smonta = toks.slice(sidx+1, toks.length-1).join(' ');
+      }
+      break;
+    }
+  }
+
+  // Orario line: first non-empty line after the "Orario" token
+  let orarioTimes = [];
+  let seg_line = '';
+  const oIdx = lines.findIndex(l => l.trim() === 'Orario' || l.trim().startsWith('Orario '));
+  if (oIdx !== -1){
+    let candidate = lines[oIdx].replace(/^Orario\s*/, '').trim();
+    let li = oIdx;
+    while (candidate === '' && li+1 < lines.length){ li++; candidate = lines[li].trim(); }
+    seg_line = candidate;
+    orarioTimes = (candidate.match(/\d{1,2}:\d{2}/g) || []);
+  }
+  if (!orarioTimes.length) return null;
+
+  let oreStr = null, compStr = null;
+  const ocm = seg_line.match(/\b60\s+(-?\d+,\d{2})\s+(-?\d+,\d{2})/);
+  if (ocm){ oreStr = ocm[1]; compStr = ocm[2]; }
+
+  let kmTot = null;
+  const kmm = text.match(/NOTE\s+KM\s+([\d.]+,\d{2})/);
+  if (kmm) kmTot = kmm[1];
+
+  // table region: between header line and the NOTE boundary line
+  let headerIdx = -1, noteIdx = -1;
+  for (let i=0;i<lines.length;i++){
+    if (/^TA\s+DA\s+A\s+LIN/.test(lines[i])) headerIdx = i;
+    if (headerIdx !== -1 && i > headerIdx && /^NOTE(\s+KM.*)?$/.test(lines[i].trim())){ noteIdx = i; break; }
+  }
+  if (headerIdx === -1 || noteIdx === -1) return null;
+  const tableLines = lines.slice(headerIdx+1, noteIdx);
+  const tableText = tableLines.join('\n');
+  const isRiserva = tableText.includes('RISERVA');
+
+  // orario absolute minutes, rolling forward across midnight
+  const orarioMin = [toMinColon(orarioTimes[0])];
+  for (let i=1;i<orarioTimes.length;i++){
+    orarioMin.push(rollFwd(toMinColon(orarioTimes[i]), orarioMin[orarioMin.length-1]));
+  }
+  const pieces = [];
+  for (let i=0;i+1<orarioMin.length;i+=2) pieces.push([orarioMin[i], orarioMin[i+1]]);
+  const turnoNetto = pieces.reduce((s,p) => s + (p[1]-p[0]), 0);
+  const turnoLordo = orarioMin.length>=2 ? (orarioMin[orarioMin.length-1]-orarioMin[0]) : null;
+  const interruzione = turnoLordo !== null ? (turnoLordo - turnoNetto) : null;
+
+  // tokens: pairs and singles of HH.MM within table text, in order
+  const pairRe = /(\d{1,2}\.\d{2})\s+(\d{1,2}\.\d{2})/g;
+  const singleRe = /(\d{1,2}\.\d{2})/g;
+  const consumed = [];
+  const tokens = [];
+  let m;
+  pairRe.lastIndex = 0;
+  while ((m = pairRe.exec(tableText)) !== null){
+    tokens.push({type:'pair', s:m[1], e:m[2], pos:m.index});
+    consumed.push([m.index, m.index+m[0].length]);
+  }
+  singleRe.lastIndex = 0;
+  while ((m = singleRe.exec(tableText)) !== null){
+    const p = m.index;
+    const inside = consumed.some(([a,b]) => a<=p && p<b);
+    if (!inside) tokens.push({type:'single', t:m[1], pos:p});
+  }
+  tokens.sort((a,b) => a.pos-b.pos);
+
+  // map a char position to its raw source line
+  const lineSpans = [];
+  { let off=0; for (const ln of tableLines){ lineSpans.push([off, off+ln.length, ln]); off += ln.length+1; } }
+  function lineForPos(p){
+    for (const [a,z,ln] of lineSpans) if (a<=p && p<=z) return ln.trim();
+    return '';
+  }
+
+  let cur = orarioMin[0];
+  let guida = 0;
+  const legs = [];
+  for (const tok of tokens){
+    if (tok.type === 'pair'){
+      const sAbs = rollFwd(toMinDot(tok.s), cur);
+      const eAbs = rollFwd(toMinDot(tok.e), sAbs);
+      const dur = eAbs - sAbs;
+      guida += dur;
+      legs.push({s: sAbs, e: eAbs, dur, raw: lineForPos(tok.pos)});
+      cur = eAbs;
+    } else {
+      cur = rollFwd(toMinDot(tok.t), cur);
+    }
+  }
+  if (isRiserva) guida = 0;
+  let sosta = turnoNetto !== null ? Math.max(0, turnoNetto - guida) : null;
+
+  return {
+    turno: tid, monta, smonta, deposito,
+    orario_raw: orarioTimes.join(' / '),
+    n_pezzi: pieces.length,
+    turno_netto_min: turnoNetto, interruzione_min: interruzione,
+    guida_min: guida, sosta_min: sosta,
+    ore_pdf: oreStr, comp_pdf: compStr, km_pdf: kmTot,
+    is_riserva: isRiserva, legs
+  };
+}
+
+// ---------- Rendering ----------
+function renderSummary(results){
+  const n = results.length;
+  const sum = (f) => results.reduce((s,r) => s + (f(r)||0), 0);
+  const guidaTot = sum(r=>r.guida_min);
+  const sostaTot = sum(r=>r.sosta_min);
+  const nettoTot = sum(r=>r.turno_netto_min);
+  const kmTot = sum(r=>parseFloat((r.km_pdf||'0').replace(/\./g,'').replace(',','.')));
+  const pctGuida = nettoTot ? (guidaTot/nettoTot*100) : 0;
+
+  summaryEl.innerHTML = `
+    <div class="sum-cell"><div class="label">Turni analizzati</div><div class="value">${n}</div></div>
+    <div class="sum-cell"><div class="label">Guida totale</div><div class="value">${mmHHMM(guidaTot)}</div></div>
+    <div class="sum-cell"><div class="label">Sosta totale</div><div class="value cyan">${mmHHMM(sostaTot)}</div></div>
+    <div class="sum-cell"><div class="label">% guida media</div><div class="value">${pctGuida.toFixed(1)}%</div></div>
+    <div class="sum-cell"><div class="label">Km totali</div><div class="value cyan">${kmTot.toLocaleString('it-IT',{maximumFractionDigits:0})}</div></div>
+  `;
+  summaryEl.style.display = 'grid';
+}
+
+function cardHTML(r){
+  const pct = r.turno_netto_min ? (r.guida_min/r.turno_netto_min*100) : 0;
+  const legsRows = r.legs.map((l,i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td>${clockLabel(l.s)}</td>
+      <td>${clockLabel(l.e)}</td>
+      <td>${mmHHMM(l.dur)}</td>
+      <td class="desc">${escapeHTML(cleanDesc(l.raw, l))}</td>
+    </tr>`).join('');
+
+  return `
+    <div class="card-head">
+      <div>
+        <div class="turno mono">${r.turno}</div>
+        <div class="dep">${r.deposito||''} · ${r.monta||''} → ${r.smonta||''}</div>
+      </div>
+      <div class="tag ${r.is_riserva?'riserva':''}">${r.is_riserva? 'Riserva':'Servizio'}</div>
+    </div>
+    <div class="orario-line">${r.orario_raw}${r.n_pezzi>1 ? ' · turno spezzato' : ''}</div>
+    <div class="bar"><div class="guida" style="width:${pct}%"></div><div class="sosta" style="width:${100-pct}%"></div></div>
+    <div class="metrics">
+      <div class="metric"><div class="k">Guida effettiva</div><div class="v amber mono">${mmHHMM(r.guida_min)}</div></div>
+      <div class="metric"><div class="k">Sosta / attesa</div><div class="v mono">${mmHHMM(r.sosta_min)}</div></div>
+      <div class="metric"><div class="k">Durata turno</div><div class="v dim mono">${mmHHMM(r.turno_netto_min)}</div></div>
+      <div class="metric"><div class="k">Interruzione</div><div class="v dim mono">${r.interruzione_min ? mmHHMM(r.interruzione_min) : '—'}</div></div>
+    </div>
+    <div class="card-foot">
+      <span>${r.legs.length} tratte · ${pct.toFixed(0)}% guida</span>
+      <span>${r.km_pdf ? r.km_pdf+' km' : ''}</span>
+    </div>
+    <div class="detail">
+      <table>
+        <thead><tr><th>#</th><th>Partenza</th><th>Arrivo</th><th>Durata</th><th>Tratta</th></tr></thead>
+        <tbody>${legsRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function cleanDesc(raw){
+  let s = raw.replace(/^\d{4}\s+/, '');
+  s = s.replace(/\d{1,2}\.\d{2}\s+\d{1,2}\.\d{2}/, '');
+  s = s.replace(/\d+,\d{2}\s*$/, '');
+  return s.replace(/\s{2,}/g, ' ').trim();
+}
+function escapeHTML(s){
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderCards(results){
+  applyFilters();
+}
+
+function applyFilters(){
+  const q = searchBox.value.trim().toUpperCase();
+  const sortMode = sortSel.value;
+  let list = allResults.filter(r => !q || r.turno.includes(q));
+  if (sortMode === 'guida_desc') list = list.slice().sort((a,b) => b.guida_min - a.guida_min);
+  else if (sortMode === 'sosta_desc') list = list.slice().sort((a,b) => (b.sosta_min||0) - (a.sosta_min||0));
+  else if (sortMode === 'netto_desc') list = list.slice().sort((a,b) => (b.turno_netto_min||0) - (a.turno_netto_min||0));
+  else list = list.slice().sort((a,b) => a.turno.localeCompare(b.turno));
+
+  cardsEl.innerHTML = list.map(r => `<div class="card" data-turno="${r.turno}">${cardHTML(r)}</div>`).join('');
+  cardsEl.style.display = 'grid';
+  countLbl.textContent = `${list.length} di ${allResults.length} turni`;
+
+  cardsEl.querySelectorAll('.card').forEach(card => {
+    card.addEventListener('click', () => card.classList.toggle('expanded'));
+  });
+}
+
+searchBox.addEventListener('input', applyFilters);
+sortSel.addEventListener('change', applyFilters);
+</script>
+</body>
+</html>
